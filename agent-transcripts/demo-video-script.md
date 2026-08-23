@@ -3,6 +3,17 @@
 Target runtime: ~2:30. Camera on throughout per the assignment's requirement.
 Bullet points, not a word-for-word script — talk naturally.
 
+**Real timing, measured live on this machine with `llama3.2:3b` (CPU only,
+no GPU):** a grounded QA answer took ~55s once the model was warm; the Ship
+30 essay took the full several minutes (long-form generation is genuinely
+slow on CPU). **Don't wait on camera for these.** Either: (a) send the
+prompt, say your talking points while it's "thinking" off to the side, and
+cut the dead air in editing, or (b) pre-generate the responses in the same
+session just before recording (same session ID, same warm model) and
+re-send the identical prompt on camera — Ollama keeps the model loaded for
+a few minutes, so a repeat prompt against a warm model is much faster than
+the first cold one.
+
 ## 1. The problem (≈30s)
 
 - "Lenny's Podcast has 300+ episodes of product and growth advice, but
@@ -41,9 +52,19 @@ Live screen share, `localhost:5173` open:
 
 ## 3. One technical trade-off (≈40s)
 
-Pick ONE of these (grounding-strictness is the most demo-visible; pick
-whichever felt most natural live):
+Pick ONE of these (the first is the freshest/most concrete — it's a real
+bug I hit and fixed while testing this exact build, not a hypothetical):
 
+- **Local-model latency forced real config changes, and exposed a real bug**:
+  "When I actually ran this against real Ollama, an 8-billion-parameter
+  model was too slow on CPU-only hardware — a single answer's prompt
+  processing alone took minutes. I measured it, switched the default to a
+  smaller 3B model, and had to raise timeouts and cap token budgets based on
+  real numbers, not guesses. That process actually surfaced a real bug: when
+  a request timed out, the app was wrapping its own 'model unavailable'
+  error message inside a Ship 30 essay artifact instead of just failing
+  cleanly — so I fixed it to fall back to a plain error message with no
+  artifact at all, and added a regression test for it."
 - **Rule-based routing over LLM tool-calling**: "I route which skill handles
   a message — plain Q&A, essay, or artifact — with keyword rules instead of
   letting the model decide via tool-calling. Small local models are
@@ -70,14 +91,20 @@ whichever felt most natural live):
 
 ## Logistics checklist before recording
 
-- [ ] Ollama running (`ollama serve`), both models pulled
-- [ ] Postgres up (`docker compose up -d db`) or a fresh `dev.db` for sqlite,
-      transcripts ingested (`python scripts/ingest.py`) — **do this well
-      before recording**, ingestion takes 20-30 min on CPU-only local
-      embeddings and you don't want dead air
-- [ ] Backend + frontend running, `localhost:5173` loaded and warmed up
-      (send one throwaway message first so the very first model load/JIT
-      isn't during the recording)
+- [ ] Ollama running (`ollama serve`) — `llama3.2:3b` and `nomic-embed-text`
+      are already pulled from this session's testing (`ollama list` to
+      confirm)
+- [ ] `backend/dev.db` already has all 10 transcripts ingested (1,129 real
+      chunks) from this session — point `DATABASE_URL` at
+      `sqlite+aiosqlite:///./dev.db` and skip ingestion entirely, or use
+      `docker compose up -d db` + real Postgres if you've got Docker sorted
+      by recording time
+- [ ] Backend + frontend running, `localhost:5173` loaded — send one
+      throwaway grounded question first (off camera) to warm the model up;
+      Ollama keeps it loaded for a few minutes afterward, which is the
+      window you want to record in
 - [ ] Screen recording software running with system audio + mic + camera
 - [ ] Have the 3 example prompts above ready to paste so you're not typing
       live and burning time
+- [ ] Decide upfront: are you narrating over real wait time, or
+      pre-generating and re-sending on a warm model? Don't decide this live.

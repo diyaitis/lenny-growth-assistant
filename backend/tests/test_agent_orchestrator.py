@@ -38,9 +38,20 @@ class FakeChatProvider(ChatProvider):
     name = "fake"
     model = "fake-model"
 
-    def __init__(self, responses: list[str] | None = None, raise_unavailable: bool = False):
+    def __init__(
+        self,
+        responses: list[str] | None = None,
+        raise_unavailable: bool = False,
+        degraded_response: str | None = None,
+    ):
         self.responses = list(responses or [])
         self.raise_unavailable = raise_unavailable
+        # Simulates what AgentOrchestrator actually receives in production
+        # when the real FallbackChatProvider's primary+fallback both fail:
+        # a normal (non-raising) LLMResponse with degraded=True and canned
+        # content, not an exception — the orchestrator never sees the
+        # retry/fallback machinery itself, only its outcome.
+        self.degraded_response = degraded_response
         self.calls: list[tuple[list[ChatMessage], str]] = []
 
     async def health_check(self) -> bool:
@@ -50,6 +61,8 @@ class FakeChatProvider(ChatProvider):
         self.calls.append((messages, system))
         if self.raise_unavailable:
             raise LLMUnavailableError("simulated outage")
+        if self.degraded_response is not None:
+            return LLMResponse(content=self.degraded_response, provider="none", model="none", degraded=True)
         content = self.responses.pop(0) if self.responses else "default fake response"
         return LLMResponse(content=content, provider=self.name, model=self.model)
 
@@ -82,7 +95,14 @@ async def test_qa_is_grounded_when_relevant_chunk_exists():
     await _seed_chunk("Elena Verna says activation beats acquisition for B2B growth teams.")
     provider = FakeChatProvider(responses=["Activation matters more than acquisition, per Elena Verna."])
     orchestrator = await _make_orchestrator(provider)
-    result = await orchestrator.handle_message([], "What did Elena Verna say about activation acquisition?")
+    # Real embeddings would score this pair ~0.7+ on semantic similarity alone
+    # (verified against real corpus data — see RETRIEVAL_MIN_SCORE's comment
+    # in config.py); the hash-based fallback used in tests only picks up
+    # literal token overlap, so the query needs to actually share vocabulary
+    # with the seeded chunk to clear the same real-world-calibrated threshold.
+    result = await orchestrator.handle_message(
+        [], "Tell me what Elena Verna says about activation beats acquisition for B2B growth teams."
+    )
 
     assert result.skill == Skill.qa
     assert result.grounded is True
@@ -115,6 +135,25 @@ async def test_ship30_retries_once_when_validation_fails_then_succeeds():
     assert result.artifact.kind == "markdown"
     assert "Activation Beats Acquisition" in result.artifact.raw_content
     assert result.debug["validation_issues"] == []
+
+
+@pytest.mark.asyncio
+async def test_ship30_skips_artifact_when_provider_degrades():
+    # Found via live testing against real Ollama: when generation degrades
+    # (times out on both primary and fallback), the canned "unavailable"
+    # message was getting wrapped in a Markdown artifact and presented as
+    # the essay — an artifact literally titled with an error message. The
+    # fix: a degraded response short-circuits to a plain degraded reply,
+    # same as the QA path, with no artifact at all.
+    canned = "I couldn't reach the language model backing this assistant right now (ollama is unavailable)."
+    provider = FakeChatProvider(degraded_response=canned)
+    orchestrator = await _make_orchestrator(provider)
+
+    result = await orchestrator.handle_message([], "turn this into a ship 30 for 30 essay")
+
+    assert result.degraded is True
+    assert result.artifact is None
+    assert result.reply == canned
 
 
 @pytest.mark.asyncio
@@ -155,6 +194,19 @@ async def test_artifact_skill_falls_back_to_markdown_when_model_ignores_fence_fo
     assert result.artifact is not None
     assert result.artifact.kind == "markdown"
     assert "oops" in result.artifact.raw_content
+
+
+@pytest.mark.asyncio
+async def test_artifact_skill_skips_artifact_when_provider_degrades():
+    canned = "I couldn't reach the language model backing this assistant right now (ollama is unavailable)."
+    provider = FakeChatProvider(degraded_response=canned)
+    orchestrator = await _make_orchestrator(provider)
+
+    result = await orchestrator.handle_message([], "generate an html artifact for this")
+
+    assert result.degraded is True
+    assert result.artifact is None
+    assert result.reply == canned
 
 
 @pytest.mark.asyncio

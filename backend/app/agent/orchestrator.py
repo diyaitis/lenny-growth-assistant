@@ -32,8 +32,6 @@ from app.skills import ship30
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY_MESSAGES = 20
-ARTIFACT_MAX_TOKENS = 3500
-SHIP30_MAX_TOKENS = 3000
 
 
 @dataclass
@@ -132,7 +130,7 @@ class AgentOrchestrator:
         system = ship30.build_system_prompt(target_words) + f"\n\nCONTEXT:\n{context}"
         messages = [ChatMessage(role="user", content=user_message)]
 
-        resp = await self.provider.chat(messages, system, max_tokens=SHIP30_MAX_TOKENS)
+        resp = await self.provider.chat(messages, system, max_tokens=self.settings.ship30_max_output_tokens)
         validation = ship30.validate_essay(resp.content, target_words)
 
         if not validation.ok and not resp.degraded:
@@ -141,8 +139,23 @@ class AgentOrchestrator:
                 "Revise it to fix these while keeping everything else. Output only the corrected essay."
             )
             retry_messages = [ChatMessage(role="user", content=feedback)]
-            resp = await self.provider.chat(retry_messages, system, max_tokens=SHIP30_MAX_TOKENS)
+            resp = await self.provider.chat(retry_messages, system, max_tokens=self.settings.ship30_max_output_tokens)
             validation = ship30.validate_essay(resp.content, target_words)
+
+        if resp.degraded:
+            # The provider fell back to its canned "unavailable" message —
+            # that text is not an essay. Surface it as a plain degraded
+            # reply (like the QA path does) instead of wrapping an error
+            # message in a Markdown artifact and presenting it as content.
+            return AgentResult(
+                reply=resp.content,
+                skill=Skill.ship30_essay,
+                provider=resp.provider,
+                model=resp.model,
+                degraded=True,
+                grounded=grounded,
+                citations=citations if grounded else [],
+            )
 
         title_match = resp.content.lstrip().splitlines()[0].lstrip("# ").strip() if resp.content.strip() else "Essay"
         artifact = GeneratedArtifact(
@@ -172,7 +185,20 @@ class AgentOrchestrator:
     async def _handle_artifact(self, history, user_message, context, citations, grounded) -> AgentResult:
         system = prompts.ARTIFACT_SYSTEM_PROMPT.format(context=context)
         messages = _history_to_messages(history) + [ChatMessage(role="user", content=user_message)]
-        resp = await self.provider.chat(messages, system, max_tokens=ARTIFACT_MAX_TOKENS)
+        resp = await self.provider.chat(messages, system, max_tokens=self.settings.artifact_max_output_tokens)
+
+        if resp.degraded:
+            # Same reasoning as the Ship 30 path: the canned "unavailable"
+            # message is not a real artifact, so don't wrap it as one.
+            return AgentResult(
+                reply=resp.content,
+                skill=Skill.artifact,
+                provider=resp.provider,
+                model=resp.model,
+                degraded=True,
+                grounded=grounded,
+                citations=citations if grounded else [],
+            )
 
         artifact = extract_artifact(resp.content, fallback_title="Generated artifact")
         if artifact is None:
@@ -188,8 +214,6 @@ class AgentOrchestrator:
             )
 
         reply = f"Here's the {artifact.kind} artifact you asked for — open it in the viewer to the side."
-        if resp.degraded:
-            reply += " (Note: the model is currently in degraded/fallback mode.)"
 
         return AgentResult(
             reply=reply,

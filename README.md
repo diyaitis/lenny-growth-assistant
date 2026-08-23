@@ -58,13 +58,17 @@ Full detail (schema, endpoints, ingestion flow, security model) is in
 Pull the models the demo needs once:
 
 ```bash
-ollama pull llama3.1:8b        # or any chat model that fits your machine
+ollama pull llama3.2:3b        # or any chat model that fits your machine
 ollama pull nomic-embed-text   # embeddings for retrieval
 ollama serve                   # if not already running as a service
 ```
 
-If you use a different chat model, set `OLLAMA_MODEL` accordingly (see
-`.env.example`) — nothing else needs to change.
+`llama3.2:3b` is the default because it's what was actually verified
+end-to-end on CPU-only hardware (see Troubleshooting below) — `llama3.1:8b`
+also produces correct, grounded, well-cited answers, but was noticeably
+slower per turn on a laptop CPU. If you have a GPU or beefier hardware,
+`llama3.1:8b` (or larger) is a straight upgrade: set `OLLAMA_MODEL`
+accordingly (see `.env.example`) and restart — nothing else needs to change.
 
 ## Quick start (Docker Compose)
 
@@ -168,6 +172,7 @@ A manual UI test plan (things to click through in a browser) is in
 | Ingestion says "0 transcripts" | Run `bash scripts/fetch_transcripts.sh` first — `data/transcripts/` is git-ignored on purpose (see `data/README.md`). |
 | Every answer says "I don't have grounding for that" | Ingestion hasn't run yet, or Ollama's embedding model isn't pulled (`ollama pull nomic-embed-text`) so retrieval degraded to the low-quality hash fallback — still functional, just weaker. Check backend logs for `embedding_fallback_hash`. |
 | `docker compose up` backend can't reach Ollama | On Linux, confirm `extra_hosts: host.docker.internal:host-gateway` took effect (`docker compose config`), or set `OLLAMA_BASE_URL` to your host's LAN IP. |
+| Chat requests time out / degrade even though Ollama is running | Measured on real hardware during development: a CPU-only laptop with no GPU does ~3-5 tokens/sec, and a grounded QA turn's ~1,700-token retrieved context can take 2-4+ minutes end to end — slower than you'd expect from "a small local model." Raise `LLM_TIMEOUT_SECONDS` further, lower `RETRIEVAL_TOP_K` (shorter prompts), or switch `OLLAMA_MODEL` to something smaller like `llama3.2:3b`. This is a hardware-speed issue, not a correctness bug — retrieval/grounding still work correctly during the wait. |
 | Postgres connection errors | Confirm `db` is healthy (`docker compose ps`) before the backend starts — Compose already waits on `service_healthy`, but a first-run image pull can be slow. |
 | HTML artifact looks blank / stripped-down | Intentional — see `architecture.md` > Security for the sandboxing/sanitization rules the artifact viewer enforces. |
 

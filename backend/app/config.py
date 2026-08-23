@@ -54,12 +54,38 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="llama3.1:8b")
     ollama_embedding_model: str = Field(default="nomic-embed-text")
 
-    llm_timeout_seconds: float = Field(default=60.0)
-    llm_max_output_tokens: int = Field(default=2000)
+    # 120s covered plain QA in testing; the Ship 30 skill legitimately needs
+    # ~1700+ output tokens for a ~1,250-word essay, which at this hardware's
+    # measured ~5 tok/sec is 300s+ on its own — and a failed-validation retry
+    # (see skills/ship30.py) makes a second full call, not a cheap one. 300s
+    # is long enough for a single long-form call to actually finish instead
+    # of being killed by a timeout tuned for short QA answers.
+    llm_timeout_seconds: float = Field(default=300.0)
+    # 2000 was the original default; measured live against a real CPU-only
+    # Ollama run, an under-confident/rambling QA answer with no natural stop
+    # point burned through it and took minutes on ~3-5 tok/sec hardware. 600
+    # is generous for a QA answer and keeps typical-case latency sane on
+    # modest hardware; raise it back up if you have GPU-backed inference.
+    llm_max_output_tokens: int = Field(default=600)
+    # Ship 30 essays and generated artifacts are long-form by design and need
+    # a much bigger budget than a QA answer — kept as separate settings
+    # (not reusing llm_max_output_tokens) so tuning one doesn't silently
+    # truncate the other.
+    ship30_max_output_tokens: int = Field(default=1800)
+    artifact_max_output_tokens: int = Field(default=2500)
 
     # --- Retrieval ---
     retrieval_top_k: int = Field(default=6)
-    retrieval_min_score: float = Field(default=0.15)
+    # Calibrated against real nomic-embed-text cosine scores, not guessed:
+    # a genuinely relevant chunk scored 0.71-0.76 in testing, while a
+    # deliberately off-topic question ("boiling point of mercury") still
+    # scored 0.47-0.54 against the same corpus — high enough to clear a
+    # naive 0.15 floor and get treated as "grounded" when it plainly wasn't.
+    # 0.35 sits in the gap between those two clusters. This is tuned for
+    # nomic-embed-text specifically; recalibrate if you swap embedding
+    # models, since cosine-similarity distributions aren't portable across
+    # embedding models.
+    retrieval_min_score: float = Field(default=0.35)
     chunk_target_tokens: int = Field(default=280)
     chunk_overlap_tokens: int = Field(default=40)
     embedding_dimensions: int = Field(default=768)  # nomic-embed-text output size

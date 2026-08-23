@@ -47,3 +47,13 @@ def test_word_count_within_tolerance_passes():
     result = validate_essay(essay, target_words=1250)
     assert result.word_count > 1250  # extra words from title/bullets are fine
     assert all("word count" not in issue for issue in result.issues)
+
+
+def test_bullet_character_bullets_are_recognized():
+    # Found live against a real local model, which used "•" bullets instead
+    # of Markdown "-"/"*" — genuinely skimmable formatting that the original
+    # regex didn't recognize as a bullet list at all.
+    words = " ".join(["word"] * 1250)
+    essay = f"# Title\n\n**Important.**\n\n• one\n• two\n\n{words}"
+    result = validate_essay(essay, target_words=1250)
+    assert not any("bullet" in issue for issue in result.issues)

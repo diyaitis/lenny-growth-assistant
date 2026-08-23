@@ -72,7 +72,12 @@ def validate_essay(markdown: str, target_words: int = TARGET_WORDS_DEFAULT) -> E
     if not re.search(r"^#{1,2}\s", markdown, re.MULTILINE):
         issues.append("missing a title/H1 or section headings")
 
-    if len(re.findall(r"^\s*[-*]\s", markdown, re.MULTILINE)) == 0:
+    # Found live against a real (small) local model: it produced a genuinely
+    # well-structured bullet list using "•" instead of Markdown "-"/"*". That's
+    # valid skimmable formatting, not a formatting failure, so the bullet
+    # glyphs recognized here intentionally aren't limited to strict
+    # CommonMark list markers.
+    if len(re.findall(r"^\s*[-*•·]\s", markdown, re.MULTILINE)) == 0:
         issues.append("no bullet list found (skimmable formatting expects at least one)")
 
     if "**" not in markdown:

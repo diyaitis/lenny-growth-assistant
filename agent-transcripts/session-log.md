@@ -231,7 +231,95 @@ current file," not "redo everything since the last full run." Re-ran the
 full test suite after the change (still 47/47) before re-running ingestion
 in the background with a realistic time budget.
 
-### 10.5 Browser tooling — still not connected
+### 10.5 The actual live test — real Ollama, real corpus, real bugs
+
+Once ingestion finished (10 transcripts, 1,129 real chunks with real
+`nomic-embed-text` embeddings), ran the app for real for the first time —
+not against sqlite-with-a-fake-provider like the automated tests, but a
+live backend against a live local Ollama.
+
+**Retrieval worked immediately and well.** A grounded question about Elena
+Verna scored 0.71-0.76 similarity against her own transcript's chunks —
+real semantic matching, not luck.
+
+**Generation did not work immediately, for real hardware reasons, not
+code bugs.** Three real findings, each fixed with evidence rather than
+guessing:
+
+1. **`llama3.1:8b` was too slow for this CPU.** Measured directly:
+   `ollama ps` and a raw `/api/chat` call showed ~3-5 tokens/sec for both
+   prompt-eval and generation, no GPU. A grounded QA turn's ~1,700-token
+   context alone made prompt-eval take minutes. Switched the default model
+   to `llama3.2:3b`, which the assignment brief's own phrasing ("a model
+   that works comfortably on your machine") explicitly permits — and it's
+   the one that actually got verified end-to-end here.
+
+2. **`RETRIEVAL_MIN_SCORE=0.15` was never calibrated against a real
+   embedding model.** A deliberately unrelated question ("boiling point of
+   mercury") against the real corpus still scored 0.47-0.54 — comfortably
+   above 0.15. Raised to 0.35, in the real gap between that and the
+   0.71-0.76 relevant-question cluster measured in the same session. (The
+   system prompt's honesty instruction caught this particular case anyway —
+   the model said "the transcripts I have don't cover that" even though the
+   grounded flag was technically true — but the threshold itself was still
+   miscalibrated and worth fixing rather than relying on the LLM alone.)
+
+3. **`LLM_MAX_OUTPUT_TOKENS=2000` plus `LLM_TIMEOUT_SECONDS=60` was a bad
+   combination on slow hardware.** An uncapped, under-confident answer could
+   ramble long enough to blow way past a 60s (then 120s, then 300s) timeout.
+   Ship 30 essays legitimately need ~1,800 output tokens for a ~1,250-word
+   essay, which took a genuine 600s to complete on this CPU — that's not a
+   timeout misconfiguration, that's just how long it takes. Split QA's
+   token budget (600, works fine within 120-300s) from Ship 30/artifact's
+   (1800/2500, needs the full 600s ceiling), removed the two constants that
+   used to hardcode this in `orchestrator.py`, made them real settings.
+
+**A genuine bug found by this testing, not a performance tune:** when a
+provider call degrades (both primary and fallback fail), the Ship 30 and
+artifact handlers were wrapping the canned "ollama is unavailable" message
+in a Markdown/HTML artifact and presenting *that* as the generated essay/doc
+— an artifact literally titled with an error message. First reproduced by
+accident (a real timeout mid-testing), then fixed properly: both handlers
+now short-circuit to a plain degraded chat reply with no artifact at all
+when `resp.degraded` is true, matching how the QA path already behaved.
+Added a `FakeChatProvider(degraded_response=...)` mode and two regression
+tests so this can't silently regress.
+
+**A second real bug, found in the validator itself, not the model:** once
+generation actually succeeded, the Ship 30 essay was genuinely well-
+structured — grounded, on-topic, a real "Key Takeaways" bullet section, a
+concrete closing action — but the automated style validator still flagged
+"no bullet list found." The model had used "•" characters, not Markdown
+"-"/"*", and the validator's regex only recognized the latter. Fixed by
+widening the bullet-glyph pattern to include "•"/"·" — a real formatting
+style, not a formatting failure. Did *not* loosen the heading check the
+same way (the model used bold text as pseudo-headers instead of real `#`
+headings): real Markdown headings get distinct visual treatment in the
+artifact viewer's CSS that bold inline text doesn't, so flagging that gap
+honestly is correct, not a bug to paper over. This is a genuine, disclosed
+limitation of a 3B-parameter model's instruction-following, not a system
+defect — and it's exactly what the automated style check + "(Note:
+automated style check flagged: ...)" chat message exist to surface rather
+than hide.
+
+Net result after all of the above: a real grounded QA answer (`degraded:
+false`, citations to the correct guest), a real Ship 30 essay artifact
+(`degraded: false`, genuinely grounded content, honestly flagged for the
+gaps it actually had), and a real HTML artifact (`degraded: false`,
+grounded, correctly quoting Elena Verna) with the sanitizer's injected
+Content-Security-Policy meta tag actually present in what the real model's
+output produced — confirming the security pipeline runs correctly against
+genuine LLM output, not just the synthetic strings in
+`test_artifact_sanitizer.py`. All three skills verified all the way through
+the real local-model path this demo is required to run on, not mocked.
+
+The fully-ingested sqlite database from this session (10 transcripts, 1,129
+real-embedded chunks) was saved as `backend/dev.db` — gitignored, stays
+local — so anyone continuing on this machine gets the already-ingested
+corpus for free via `DATABASE_URL=sqlite+aiosqlite:///./dev.db` without
+re-running the ~25 minute ingestion.
+
+### 10.6 Browser tooling — still not connected
 
 The user installed the Claude in Chrome extension and ran `/chrome` mid-
 session. Checked for the resulting browser tools via `ToolSearch` — none

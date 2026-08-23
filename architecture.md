@@ -303,7 +303,14 @@ Ollama URL, see `tests/conftest.py`):
 ### Manual test plan
 
 Run this against `docker compose up` with Ollama actually running and
-transcripts ingested:
+transcripts ingested. **Items 1, 2, 3, 6, and 7 were actually run in a real
+browser** (not just curl) during development — see
+`agent-transcripts/session-log.md` § 10.7 for what that found and fixed
+(a citation-dedup bug and a missing artifact-restore-on-session-switch
+feature, both fixed with tests). Items 4, 5, 8, 9, and 10 below were
+exercised at the API level (automated tests + curl) but not re-confirmed
+pixel-by-pixel in a browser — worth a final pass before considering the UI
+fully signed off:
 
 1. **Cold start**: load the app with no existing sessions → a session is
    auto-created, empty-state copy is visible, status bar shows
@@ -323,9 +330,11 @@ transcripts ingested:
 6. **HTML artifact**: ask for "an html landing page summarizing this" →
    artifact panel renders it in an iframe; open devtools and confirm the
    iframe has `sandbox="allow-scripts"` with no `allow-same-origin`.
-7. **New session**: click "+ New chat" → sidebar shows both sessions,
-   switching between them shows the right history and clears the artifact
-   panel.
+7. **New session / switching sessions**: click "+ New chat" → sidebar shows
+   both sessions, switching between them shows the right history. If the
+   session you switch to previously generated an artifact, it's restored
+   (`GET /sessions/{id}/artifacts/latest`); a session with no artifacts
+   shows the empty state.
 8. **Provider outage**: stop `ollama serve`, send a message → status bar
    flips to "unreachable"; chat shows the degraded message, not a spinner
    forever or a browser error page. Restart Ollama, send again → normal

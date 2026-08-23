@@ -6,6 +6,8 @@ instead of 500ing.
 """
 from fastapi.testclient import TestClient
 
+from app.db.base import SessionLocal
+from app.db.models import Artifact
 from app.main import create_app
 
 
@@ -67,3 +69,63 @@ def test_get_unknown_artifact_returns_404():
     with _client() as client:
         resp = client.get("/artifacts/does-not-exist")
         assert resp.status_code == 404
+
+
+def test_latest_artifact_returns_404_when_session_has_none():
+    with _client() as client:
+        session_id = client.post("/sessions", json={}).json()["id"]
+        resp = client.get(f"/sessions/{session_id}/artifacts/latest")
+        assert resp.status_code == 404
+
+
+def test_latest_artifact_unknown_session_returns_404():
+    with _client() as client:
+        resp = client.get("/sessions/does-not-exist/artifacts/latest")
+        assert resp.status_code == 404
+
+
+def test_latest_artifact_returns_most_recent_one():
+    # Found missing during real browser QA: reopening a session that had
+    # already generated artifacts showed no artifact until you asked for a
+    # new one. This is what the frontend calls on session switch to
+    # restore it instead.
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    with _client() as client:
+        session_id = client.post("/sessions", json={}).json()["id"]
+
+        async def seed():
+            # Explicit timestamps, not two back-to-back func.now() calls:
+            # sqlite's CURRENT_TIMESTAMP has only second-level resolution,
+            # so two commits in the same test could otherwise tie and make
+            # "most recent" ordering flaky.
+            now = datetime.now(timezone.utc)
+            async with SessionLocal() as db:
+                db.add(
+                    Artifact(
+                        session_id=session_id,
+                        kind="markdown",
+                        title="Older",
+                        content="# Older",
+                        raw_content="# Older",
+                        created_at=now - timedelta(minutes=5),
+                    )
+                )
+                db.add(
+                    Artifact(
+                        session_id=session_id,
+                        kind="html",
+                        title="Newer",
+                        content="<p>new</p>",
+                        raw_content="<p>new</p>",
+                        created_at=now,
+                    )
+                )
+                await db.commit()
+
+        asyncio.run(seed())
+
+        resp = client.get(f"/sessions/{session_id}/artifacts/latest")
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Newer"

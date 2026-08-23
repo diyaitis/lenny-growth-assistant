@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   ArtifactDetail,
+  ArtifactSummary,
   ChatMessage,
   ChatResponse,
   HealthStatus,
@@ -60,4 +61,15 @@ export const api = {
     }),
 
   getArtifact: (artifactId: string) => request<ArtifactDetail>(`/artifacts/${artifactId}`),
+
+  // Returns null (not an error) when the session simply has no artifacts
+  // yet — that's the common case for most sessions, not a failure.
+  getLatestArtifact: async (sessionId: string): Promise<ArtifactSummary | null> => {
+    try {
+      return await request<ArtifactSummary>(`/sessions/${sessionId}/artifacts/latest`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
 };

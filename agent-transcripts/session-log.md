@@ -319,11 +319,63 @@ local — so anyone continuing on this machine gets the already-ingested
 corpus for free via `DATABASE_URL=sqlite+aiosqlite:///./dev.db` without
 re-running the ~25 minute ingestion.
 
-### 10.6 Browser tooling — still not connected
+### 10.6 Browser tooling — three failed connection attempts, then a fourth that worked
 
 The user installed the Claude in Chrome extension and ran `/chrome` mid-
-session. Checked for the resulting browser tools via `ToolSearch` — none
-appeared. Per the environment's own documentation, extension connections are
-typically detected at session start, so this likely needs a fresh session
-rather than being fixable mid-session. Reported this plainly rather than
-guessing or claiming a connection that wasn't actually there.
+session — three separate times, at different points in the session. Checked
+for the resulting browser tools via `ToolSearch` after each one: none
+appeared, all three times. Per the environment's own documentation,
+extension connections are detected at session start, not mid-session, so
+this was reported plainly each time rather than guessing or claiming a
+connection that wasn't actually there. It was confirmed correct: the tools
+appeared only after the user actually exited and resumed the session (a
+genuinely fresh process), not from any in-session retry.
+
+### 10.7 Real browser QA, once the extension connected
+
+Once connected, drove the real running app in a real browser instead of
+only curl — the thing the original build's session log had explicitly
+flagged as unverified ("stated plainly rather than claimed as done").
+
+- Confirmed the empty-state copy, status bar, session list, and message
+  bubbles all render as designed, with no console errors.
+- Sent a real grounded question through the actual UI (not curl) and watched
+  the full real flow: optimistic user bubble → typing indicator → real
+  ~90s-on-this-CPU Ollama response → correct single citation.
+- **Found a second real citation bug this way, visually, that curl's raw
+  JSON hadn't made obvious:** an artifact/ship30 response (2x top_k) showed
+  8-12 near-duplicate "Elena Verna 4.0 — Elena Verna 4.0" source lines —
+  multiple chunks from the same episode, each getting its own citation
+  entry. Fixed in `_build_context` (`orchestrator.py`): the model still
+  gets every retrieved chunk as context, but the user-facing citation list
+  is now deduped one-per-transcript (first occurrence = highest-scored,
+  since chunks arrive pre-sorted). Added
+  `test_citations_are_deduped_per_transcript`. Verified live in the browser
+  afterward: the same question that previously showed one bloated citation
+  list now shows exactly one.
+- **Found a third real gap, this time a missing feature, not a bug:**
+  switching to a past session that had already generated a Ship 30 essay or
+  HTML artifact reset the artifact viewer to its empty state instead of
+  showing what that session actually produced — there was simply no code
+  path that restored it. Added `GET /sessions/{id}/artifacts/latest`
+  (backend) and had the frontend call it on every session switch
+  (`App.tsx`), falling back to the empty state only when the session
+  genuinely has no artifacts yet. Added three backend tests (empty case,
+  unknown-session case, and correct-most-recent-among-several case — the
+  last one needed explicit timestamps rather than back-to-back
+  `func.now()` calls, since sqlite's `CURRENT_TIMESTAMP` only has
+  second-level resolution and two same-second commits would otherwise make
+  "most recent" ordering flaky). Verified live: reopening "live demo final"
+  now immediately shows its actual HTML artifact, correctly sandboxed
+  (confirmed via `javascript_tool`: `sandbox="allow-scripts"`, no
+  `allow-same-origin`, no `src` attribute — `srcDoc` only, exactly as
+  designed).
+- Console was clean (only Vite/React-DevTools dev-mode noise) after all of
+  the above.
+- Attempted a responsive-layout check by resizing the browser window; the
+  resize tool didn't actually change `window.innerWidth` in this
+  environment. Not chased further given everything else already verified —
+  noted honestly as unverified rather than assumed fine.
+
+51 → 54 backend tests after this round (dedup + three latest-artifact
+tests), all passing; frontend still typechecks and builds clean.

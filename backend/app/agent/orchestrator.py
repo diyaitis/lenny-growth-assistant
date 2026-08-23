@@ -59,20 +59,31 @@ def _build_context(chunks: list[RetrievedChunk]) -> tuple[str, list[dict]]:
 
     blocks = []
     citations = []
+    seen_transcripts: set[str] = set()
     for i, c in enumerate(chunks, start=1):
         label = f"[{i}] {c.guest or 'Unknown guest'} — \"{c.transcript_title}\""
         blocks.append(f"{label}\n{c.content}")
-        citations.append(
-            {
-                "index": i,
-                "transcript_id": c.transcript_id,
-                "chunk_id": c.chunk_id,
-                "guest": c.guest,
-                "title": c.transcript_title,
-                "source_url": c.source_url,
-                "score": round(c.score, 4),
-            }
-        )
+
+        # The model gets every retrieved chunk as context (more grounding
+        # material is strictly better), but the user-facing citation list is
+        # deduped one-per-transcript: a top_k of 6-12 chunks from the same
+        # episode is common (see agent/router.py's 2x top_k for ship30/
+        # artifact), and showing "Elena Verna — Elena Verna" eight times in
+        # a row is noise, not evidence. `chunks` arrives pre-sorted by score,
+        # so the first chunk seen per transcript is its best-scoring one.
+        if c.transcript_id not in seen_transcripts:
+            seen_transcripts.add(c.transcript_id)
+            citations.append(
+                {
+                    "index": i,
+                    "transcript_id": c.transcript_id,
+                    "chunk_id": c.chunk_id,
+                    "guest": c.guest,
+                    "title": c.transcript_title,
+                    "source_url": c.source_url,
+                    "score": round(c.score, 4),
+                }
+            )
     return "\n\n---\n\n".join(blocks), citations
 
 

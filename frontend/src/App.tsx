@@ -67,7 +67,14 @@ export default function App() {
 
   useEffect(() => {
     if (!activeSessionId) return;
-    setArtifact(null);
+    // Restore this session's most recent artifact (if any) instead of
+    // resetting to the empty state — found missing during browser QA:
+    // reopening a session that had already generated a Ship 30 essay or an
+    // HTML page showed no artifact at all until you asked for a new one.
+    api
+      .getLatestArtifact(activeSessionId)
+      .then(setArtifact)
+      .catch(() => setArtifact(null));
     api
       .getMessages(activeSessionId)
       .then(setMessages)

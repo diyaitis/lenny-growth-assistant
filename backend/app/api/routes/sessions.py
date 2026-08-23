@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.db.models import ChatSession, Message
+from app.db.models import Artifact, ChatSession, Message
+from app.schemas.artifact import ArtifactSummary
 from app.schemas.session import MessageResponse, SessionCreateRequest, SessionResponse
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -41,3 +42,22 @@ async def get_session_messages(session_id: str, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=404, detail="Session not found")
     result = await db.execute(select(Message).where(Message.session_id == session_id).order_by(Message.created_at))
     return result.scalars().all()
+
+
+@router.get("/{session_id}/artifacts/latest", response_model=ArtifactSummary)
+async def get_latest_artifact(session_id: str, db: AsyncSession = Depends(get_db)):
+    """Found missing during real browser QA: reopening a session with a
+    previously-generated Ship 30 essay or HTML artifact reset the viewer to
+    its empty state instead of restoring what that session actually
+    produced. The frontend calls this on session switch so the most recent
+    artifact comes back with it."""
+    session = await db.get(ChatSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    result = await db.execute(
+        select(Artifact).where(Artifact.session_id == session_id).order_by(Artifact.created_at.desc()).limit(1)
+    )
+    artifact = result.scalar_one_or_none()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="This session has no artifacts yet")
+    return artifact

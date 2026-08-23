@@ -79,6 +79,24 @@ async def _seed_chunk(content: str, title: str = "Elena Verna 4.0", guest: str =
         await db.commit()
 
 
+async def _seed_chunks_same_transcript(
+    contents: list[str], title: str = "Elena Verna 4.0", guest: str = "Elena Verna"
+):
+    """Like _seed_chunk, but multiple chunks under one transcript — the
+    common real-world case (a top_k of 6-12 pulling several chunks from the
+    same episode) that surfaced the citation-dedup bug in live testing."""
+    settings = get_settings()
+    embedder = EmbeddingService(settings)
+    vectors = await embedder.embed(contents)
+    async with SessionLocal() as db:
+        transcript = Transcript(slug=title.lower().replace(" ", "-"), title=title, guest=guest)
+        db.add(transcript)
+        await db.flush()
+        for i, (content, vector) in enumerate(zip(contents, vectors, strict=True)):
+            db.add(Chunk(transcript_id=transcript.id, chunk_index=i, content=content, token_count=50, embedding=vector))
+        await db.commit()
+
+
 async def _make_orchestrator(provider: ChatProvider) -> AgentOrchestrator:
     # Intentionally not `async with`: the session must outlive this function,
     # since retrieval happens later inside orchestrator.handle_message(). It's
@@ -108,6 +126,33 @@ async def test_qa_is_grounded_when_relevant_chunk_exists():
     assert result.grounded is True
     assert len(result.citations) > 0
     assert result.citations[0]["guest"] == "Elena Verna"
+
+
+@pytest.mark.asyncio
+async def test_citations_are_deduped_per_transcript():
+    # Found via real browser QA: an artifact/ship30 request (2x top_k) against
+    # a corpus where several chunks come from the same episode rendered as
+    # e.g. 8 near-identical "Elena Verna 4.0 — Elena Verna 4.0" source lines.
+    # The context sent to the model should still see every chunk (more
+    # grounding material is strictly better); the user-facing citation list
+    # should show each transcript once.
+    await _seed_chunks_same_transcript(
+        [
+            "Elena Verna says activation beats acquisition for B2B growth teams.",
+            "Elena Verna also says B2B growth teams should measure activation weekly.",
+            "Elena Verna adds that B2B growth teams often under-invest in activation.",
+        ]
+    )
+    provider = FakeChatProvider(responses=["Activation matters more than acquisition, per Elena Verna."])
+    orchestrator = await _make_orchestrator(provider)
+
+    result = await orchestrator.handle_message(
+        [], "Tell me what Elena Verna says about activation beats acquisition for B2B growth teams."
+    )
+
+    assert result.grounded is True
+    transcript_ids = [c["transcript_id"] for c in result.citations]
+    assert len(transcript_ids) == len(set(transcript_ids))  # no repeated transcript
 
 
 @pytest.mark.asyncio

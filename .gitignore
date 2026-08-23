@@ -1,0 +1,39 @@
+# --- Secrets / env ---
+.env
+.env.local
+*.pem
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+npm-debug.log*
+
+# --- Data (licensed third-party transcripts: fetched locally, never committed) ---
+data/transcripts/*.md
+data/_source_repo/
+!data/transcripts/.gitkeep
+
+# --- DB / runtime ---
+*.sqlite3
+pgdata/
+ollama_models/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

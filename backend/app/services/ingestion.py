@@ -3,6 +3,14 @@ and upserts everything into Postgres. Designed to be re-run safely: re-running
 on the same files re-chunks and re-embeds (a transcript is deleted and
 re-inserted), so ingestion is idempotent and there's no separate "refresh"
 code path to keep in sync with "initial load".
+
+Commits after each transcript, not once at the end: embedding is the slow
+step (one HTTP round-trip per chunk to a CPU-only local Ollama instance can
+mean 20-30+ minutes for a multi-transcript corpus), so a single commit at the
+end would mean a crash/timeout/Ctrl-C anywhere in that window loses every
+transcript embedded so far, not just the one in flight. Committing per
+transcript bounds the loss to "redo the current file" and makes ingestion
+resumable in practice, not just idempotent in theory.
 """
 from __future__ import annotations
 
@@ -94,6 +102,7 @@ async def ingest_directory(
             logger.warning("ingestion_empty_transcript", extra={"slug": parsed.slug})
             continue
 
+        logger.info("embedding_started", extra={"slug": parsed.slug, "chunks": len(chunks)})
         embeddings = await embedder.embed([c.content for c in chunks])
 
         for chunk, vector in zip(chunks, embeddings, strict=True):
@@ -107,9 +116,10 @@ async def ingest_directory(
                 )
             )
 
+        await db.commit()
+
         total_chunks += len(chunks)
         processed.append(parsed.slug)
         logger.info("ingested_transcript", extra={"slug": parsed.slug, "chunks": len(chunks)})
 
-    await db.commit()
     return {"transcripts": len(processed), "chunks": total_chunks, "files": processed}

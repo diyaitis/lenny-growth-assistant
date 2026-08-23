@@ -29,6 +29,8 @@ data/_source_repo/
 
 # --- DB / runtime ---
 *.sqlite3
+*.db
+*.db-journal
 pgdata/
 ollama_models/
 

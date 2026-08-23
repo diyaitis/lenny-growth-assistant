@@ -137,9 +137,105 @@ extension), so final pixel-level/visual QA — the manual test plan in
 `architecture.md` — is left for the evaluator to run in an actual browser;
 this is stated plainly rather than claimed as done.
 
-## 9. What would be next
+## 9. What would be next (as of the initial build)
 
 Documented in `PRD.md` > Scope as explicitly deferred rather than
 half-implemented: streaming responses, per-message model switching, an
 artifact history/gallery beyond a single current slot, and Alembic
 migrations once the schema needs to change more than once.
+
+---
+
+## 10. Follow-up session: making the local demo actually real
+
+The initial build above was verified with the resilience/degraded paths
+(sqlite + unreachable Ollama, by design, so those paths were genuinely
+exercised) but never against a real running Ollama instance, and never
+pushed anywhere. This session closed both gaps, plus attempted (and
+partially failed at) getting a real hosted Postgres running.
+
+### 10.1 GitHub — no surprises
+
+`gh` was already authenticated (`diyaitis`). `gh repo create --public
+--source=. --remote=origin` + `git push -u origin main` worked on the first
+try: https://github.com/diyaitis/lenny-growth-assistant.
+
+### 10.2 Installing Ollama — a PATH gotcha
+
+`winget install Ollama.Ollama` succeeded (this is a normal user-scope app
+install, correctly distinguished by the environment's own safety classifier
+from a system-level change like enabling WSL2, which it also correctly
+blocked pending explicit user confirmation — asked and got "install Ollama
+only").
+
+**Failed attempt:** immediately after install, `nohup ollama serve` and
+`ollama pull llama3.1:8b` both failed with "command not found" / exit 127,
+even though `ollama --version` had worked moments earlier in a different
+command. Root cause: each Bash tool invocation is a fresh shell process, and
+the installer updated the Windows user `PATH` registry value *after* the
+harness's shell process tree had already started — so the new PATH entry
+was invisible to every subsequently-spawned shell in this session until a
+genuinely new process picked up the updated environment. Fixed by referencing
+the full binary path (`/c/Users/.../AppData/Local/Programs/Ollama/ollama`)
+explicitly rather than relying on `ollama` being resolvable, which sidesteps
+the stale-PATH issue entirely rather than working around it fragile-ly.
+(Separately discovered `ollama serve` was already running as a background
+service from the installer — no need to start it manually at all.)
+
+### 10.3 Supabase Postgres — provisioned, then blocked, then reverted
+
+Since Docker (and therefore the docker-compose Postgres) wasn't available
+(no Docker Desktop; installing it needs WSL2, admin elevation via a UAC
+prompt no automated tool can click through, and a reboot — correctly treated
+as out of scope for a headless session rather than attempted anyway), tried
+provisioning Postgres via Supabase instead — which the assignment brief
+explicitly allows ("You may use Supabase or Railway"). Checked cost first
+($0/month on the free tier) and confirmed before creating anything, per the
+tool's own cost-confirmation flow. Created a project and enabled the
+`vector` extension via `apply_migration`, successfully.
+
+**Blocked, then reverted:** the user couldn't access the created project's
+dashboard — it turned out the Supabase MCP integration is authenticated
+under a different Supabase account than the one signed in in the browser.
+Tried a workaround (`ALTER USER postgres WITH PASSWORD ...` directly via the
+SQL execution tool, to sidestep needing dashboard access for a password
+reset) — failed with `permission denied to alter role: only superusers can
+alter privileged roles`, confirming the MCP tool's SQL execution runs under
+a role deliberately scoped below Postgres superuser, not a bypassable
+restriction. Rather than pursue a full integration reconnect under a
+different account (a genuine option, but a detour with an uncertain time
+cost against a deadline), the user chose to drop it. Paused the orphaned
+project (`pause_project`) rather than leaving it running unused. The
+Postgres/pgvector code path itself is unaffected — it's exactly what
+`docker compose up` exercises, and the dialect-portable `Vector` type means
+the app runs identically against sqlite in the meantime.
+
+### 10.4 Real ingestion — a genuine performance finding, and a real bug it exposed
+
+First real ingestion run against real Ollama embeddings hit the 5-minute
+foreground command timeout partway through the first transcript. Not a bug —
+CPU-only local embedding generation is genuinely ~1.7s/chunk (measured: 133
+chunks in ~224s for one transcript), so the full 10-transcript corpus was
+always going to take 20-30+ minutes, which just hadn't been exercised at
+real scale before (the automated tests use instant hash-based fake
+embeddings; the docs already noted Ollama-embedding latency was untested at
+this scale).
+
+That timeout did expose a real bug worth fixing, though: `ingest_directory`
+only called `db.commit()` once, after every file finished — so the timeout
+killed the in-progress transaction and the ~3.5 minutes already spent
+embedding the first transcript were entirely lost, not partially saved.
+Fixed by moving the commit inside the per-file loop (`app/services/
+ingestion.py`), so a crash/timeout/Ctrl-C now costs at most "redo the
+current file," not "redo everything since the last full run." Re-ran the
+full test suite after the change (still 47/47) before re-running ingestion
+in the background with a realistic time budget.
+
+### 10.5 Browser tooling — still not connected
+
+The user installed the Claude in Chrome extension and ran `/chrome` mid-
+session. Checked for the resulting browser tools via `ToolSearch` — none
+appeared. Per the environment's own documentation, extension connections are
+typically detected at session start, so this likely needs a fresh session
+rather than being fixable mid-session. Reported this plainly rather than
+guessing or claiming a connection that wasn't actually there.

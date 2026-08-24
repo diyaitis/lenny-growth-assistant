@@ -416,3 +416,44 @@ silently updating `architecture.md`'s existing justification, because the
 *investigation* — not just the conclusion — is the useful, honest artifact:
 a wrong guess corrected by hands-on verification, not a right guess
 confirmed and left unremarked.
+
+### 10.9 Real Postgres, and a genuine live fallback test
+
+Reconnected the Supabase MCP integration to the user's actual account
+(the earlier "JashFijiwala's Org" project was created under a different
+Google account than the one signed into the browser — user disconnected
+and reconnected the Supabase integration under the correct account; the
+new org showed up immediately via `list_organizations`, no session
+restart needed this time, unlike the Chrome extension). Created a fresh
+project there, enabled `vector`, and — with the user pasting the database
+password directly — connected the actual app to real Postgres for the
+first time.
+
+**A transient bug on first bootstrap:** `init_db()` failed with
+`UndefinedTableError: relation "chunks" does not exist` when creating the
+HNSW index, right after `Base.metadata.create_all` had apparently
+succeeded. Investigated rather than just retrying blind: manually tested
+`CREATE TABLE ... vector(3)` (worked), checked the `vector` extension's
+schema (correctly in `public`, ruling out a search_path issue), then ran
+`create_all` alone with SQL echo on and watched it correctly emit `CREATE
+TABLE chunks`. Every piece worked in isolation; re-running the exact same
+`init_db()` end-to-end afterward also worked cleanly. Most likely
+explanation: the project had just come back from `COMING_UP` (restored
+from a pause) moments before the first attempt, and hadn't fully settled.
+Not a code bug — logged as a real, if unresolved-in-full-certainty,
+operational observation rather than claiming false confidence about root
+cause.
+
+**Verified the LLM provider toggle live, including a real fallback
+execution — not mocked:** confirmed `/health` correctly reports identity
+and reachability for all three providers (`anthropic`/`openai` both show
+`llm_reachable: false` with no key configured, as expected), and a chat
+request against each degrades gracefully with a provider-specific message.
+Then configured `LLM_PROVIDER=anthropic` with `LLM_FALLBACK_PROVIDER=ollama`
+and sent a real message: Anthropic failed immediately (no key), and the
+`FallbackChatProvider` genuinely fell through to real Ollama, which
+answered for real — response came back `provider: "ollama"`,
+`degraded: true`, correctly distinguishing "the configured primary failed
+but the fallback saved this request" from a full failure. This is the
+first time the fallback *mechanism itself* (not just the final degraded-
+message path) was exercised against a real, live secondary provider.

@@ -379,3 +379,40 @@ flagged as unverified ("stated plainly rather than claimed as done").
 
 51 → 54 backend tests after this round (dedup + three latest-artifact
 tests), all passing; frontend still typechecks and builds clean.
+
+### 10.8 Actually investigating the "Claude Agent SDK" requirement
+
+The brief says: "Build the agent layer using the Anthropic Claude Agent SDK
+or Pi Coding Agent." The initial build used neither — a custom rule-based
+router + plain Anthropic Messages API calls instead — reasoned through and
+documented (small local models tool-call unreliably, so deterministic
+routing was chosen for the mandatory local path). That reasoning was sound
+but untested against the actual SDK. Went back and actually verified it
+rather than leaving it as an assumption.
+
+`pip install claude-agent-sdk` (0.2.144) and inspecting its public API
+confirmed what the package actually is: **the Claude Code CLI's own agent
+runtime** — `query()`/`ClaudeSDKClient` spawn and talk to a `claude` CLI
+subprocess, with a session-store, permission-mode, hook, subagent, and
+sandbox model built for autonomous coding agents (the exact SDK powering
+this very conversation), not a lightweight "call Claude with tools"
+library for a request/response chat backend. Wiring it into a FastAPI
+endpoint would mean spawning a CLI subprocess per chat message and adopting
+a permission/sandbox model with no relevance to answering product
+questions — a real architectural mismatch, not a missing nice-to-have.
+
+**Found the hard way, and immediately reverted:** installing it into the
+existing venv silently upgraded `starlette` to `1.6.0`, incompatible with
+the pinned `fastapi==0.115.6` (`requires starlette<0.42.0,>=0.40.0`) —
+a real risk of breaking the working, tested app for an integration that
+turned out to be the wrong tool for the job anyway. Uninstalled
+immediately, reinstalled `requirements.txt` to restore the pinned
+versions, and re-ran the full test suite to confirm nothing broke.
+
+Net conclusion: the original architecture decision holds, now backed by
+actually having installed and inspected the SDK rather than reasoning
+about it from the package name alone. This is recorded here instead of
+silently updating `architecture.md`'s existing justification, because the
+*investigation* — not just the conclusion — is the useful, honest artifact:
+a wrong guess corrected by hands-on verification, not a right guess
+confirmed and left unremarked.

@@ -148,6 +148,23 @@ better design. Because the brief requires the local path to work well too,
 routing had to be reliable on the weakest supported model, which pushed
 toward rules.
 
+This means the agent layer is not built on the Anthropic Claude Agent SDK
+(the brief's other named option, Pi Coding Agent, isn't a published package
+this could be evaluated against). That was verified hands-on, not assumed:
+`claude-agent-sdk` was installed and its public API inspected directly
+(`agent-transcripts/session-log.md` § 10.8). It turned out to be the Claude
+Code CLI's own agent runtime — `query()`/`ClaudeSDKClient` spawn a `claude`
+CLI subprocess and manage it through a session-store/permission-mode/hook/
+subagent/sandbox model built for autonomous coding agents, not a
+lightweight "call an LLM with tools" library suited to a request/response
+chat backend. Wiring it into this API would mean spawning a CLI process per
+chat turn and adopting a permission/sandbox model with no bearing on
+answering product questions — a mismatch, not a missing nice-to-have. (It
+also silently upgraded `starlette` to a version incompatible with the
+pinned FastAPI on install, which was reverted immediately.) The custom
+orchestrator + plain Anthropic Messages API remains the deliberate choice
+for all three providers, including Anthropic.
+
 **Retrieval always runs first, regardless of which skill the message routes
 to.** This means even a misrouted message still gets grounded context rather
 than an ungrounded fallback — the router only decides *how* to use the

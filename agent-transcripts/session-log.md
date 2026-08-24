@@ -457,3 +457,26 @@ answered for real — response came back `provider: "ollama"`,
 but the fallback saved this request" from a full failure. This is the
 first time the fallback *mechanism itself* (not just the final degraded-
 message path) was exercised against a real, live secondary provider.
+
+### 10.10 Closing the loop: real Postgres, real query, real answer
+
+Once ingestion finished (10/10 transcripts, 1,129 chunks confirmed in
+Postgres directly via `asyncpg`), booted the actual app against it
+(`db_dialect: "postgresql"` in `/health`, not sqlite) and sent one real
+question through the full stack — real pgvector `<=>` cosine search, real
+local Ollama, real citation:
+
+> "What did Jason Cohen say about signs a product has stopped growing?"
+> -> correctly identified and summarized his actual "5 questions" framework
+> from the transcript, cited to the right episode, similarity score 0.7831,
+> `degraded: false`.
+
+This is the single test that had been missing since the very first build:
+every other verification either used sqlite (by design, for the resilience
+paths) or mocked/faked the LLM (by design, for fast deterministic unit
+tests). This one used nothing fake -- real managed Postgres, real vector
+index, real model, real network round-trips end to end.
+
+Saved the working config as `backend/.env` (gitignored, confirmed via
+`git check-ignore`) so the demo video doesn't need to re-derive it or
+re-run the ~25-minute ingestion.

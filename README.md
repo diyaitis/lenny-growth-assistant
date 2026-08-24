@@ -44,6 +44,16 @@ Built as a Forward Deployed Engineer take-home. See also:
 Full detail (schema, endpoints, ingestion flow, security model) is in
 [`architecture.md`](./architecture.md).
 
+**This isn't a diagram of an untested design.** Every arrow above has been
+live-verified end to end: real Postgres+pgvector (via Supabase) with all 10
+transcripts ingested (1,129 real-embedded chunks), real HNSW similarity
+search, real local Ollama generating grounded answers with correct
+citations, a real Ship 30 essay, a real HTML artifact with its sandbox
+confirmed in a live browser, and a real fallback execution (a failed
+primary provider genuinely falling through to a working one mid-request).
+See `agent-transcripts/session-log.md` §§ 10.5–10.9 for the actual test
+runs, including the real bugs they found and fixed.
+
 ## Prerequisites
 
 - Docker + Docker Compose (recommended path), **or** Python 3.11+ and Node 20+

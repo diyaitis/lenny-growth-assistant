@@ -5,8 +5,12 @@ Bullet points, not a word-for-word script — talk naturally.
 
 **Real timing, measured live on this machine with `llama3.2:3b` (CPU only,
 no GPU):** a grounded QA answer took ~55s once the model was warm; the Ship
-30 essay took the full several minutes (long-form generation is genuinely
-slow on CPU). **Don't wait on camera for these.** Either: (a) send the
+30 essay and HTML artifact both took several minutes (long-form generation
+is genuinely slow on CPU — an HTML artifact request even hit the 300s
+timeout once during testing and degraded correctly). `backend/.env` now
+has `LLM_TIMEOUT_SECONDS=600` for headroom, but budget for a real multi-
+minute wait on the essay/artifact requests specifically. **Don't wait on
+camera for these.** Either: (a) send the
 prompt, say your talking points while it's "thinking" off to the side, and
 cut the dead air in editing, or (b) pre-generate the responses in the same
 session just before recording (same session ID, same warm model) and
